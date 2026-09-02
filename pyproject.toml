@@ -8,4 +8,5 @@ dependencies = [
     "numpy>=2.5.1",
     "opencv-python>=5.0.0.93",
     "openexr>=3.4.13",
+    "scikit-image>=0.26.0",
 ]
