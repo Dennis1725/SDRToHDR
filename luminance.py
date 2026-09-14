@@ -1,7 +1,7 @@
 import numpy as np
 
-# Fixed, identical thresholds for Reference and Generated.
-# Values are EXR luminance units, not automatically cd/m².
+# Reproducible thresholds. These are EXR luminance units unless the source
+# EXR is absolutely calibrated. Both images always use the same thresholds.
 HIGHLIGHT_THRESHOLD = 1000.0
 SHADOW_THRESHOLD = 0.1
 HIGHLIGHT_CLIP_THRESHOLD = 10000.0
@@ -11,7 +11,7 @@ LUMINANCE_EPSILON = 1e-6
 
 
 def calculate_luminance(img: np.ndarray) -> np.ndarray:
-    """Calculate relative luminance using Rec. 709 coefficients."""
+    """Calculate Rec.709 relative luminance from RGB channels."""
     if img.ndim != 3 or img.shape[-1] < 3:
         raise ValueError("Expected an image array with shape (H, W, 3+).")
     return (
@@ -22,7 +22,7 @@ def calculate_luminance(img: np.ndarray) -> np.ndarray:
 
 
 def generate_solid_angle_weights(height: int, width: int) -> np.ndarray:
-    """Generate normalized solid-angle weights for an equirectangular image."""
+    """Normalized sin(theta) weights for equirectangular images."""
     if height <= 0 or width <= 0:
         raise ValueError("Image dimensions must be positive.")
 
@@ -36,34 +36,46 @@ def generate_solid_angle_weights(height: int, width: int) -> np.ndarray:
     return np.broadcast_to(weights_1d[:, np.newaxis], (height, width)).copy()
 
 
-def _sanitize_luminance(lum: np.ndarray) -> np.ndarray:
-    """Return finite, non-negative luminance for statistical analysis."""
-    lum = np.asarray(lum, dtype=np.float64)
-    return np.nan_to_num(
-        lum,
-        nan=0.0,
-        posinf=np.finfo(np.float64).max,
-        neginf=0.0,
-    ).clip(min=0.0)
+def _finite_nonnegative_luminance(lum: np.ndarray) -> tuple[np.ndarray, int]:
+    """Return finite, non-negative luminance and the invalid-pixel count."""
+    arr = np.asarray(lum, dtype=np.float64)
+    finite = np.isfinite(arr)
+    nonnegative = np.where(finite, np.maximum(arr, 0.0), 0.0)
+    invalid_count = int(np.count_nonzero(~finite))
+    return nonnegative, invalid_count
 
 
 def analyze_luminance(img: np.ndarray) -> dict:
-    """Return HDR luminance statistics and fixed-threshold region metrics."""
+    """
+    Compute reproducible HDR luminance statistics.
+
+    Important:
+    - Statistics are calculated on the original image, before any resizing.
+    - Thresholds are fixed and identical for Reference and Generated.
+    - Values are reported as EXR units; no automatic cd/m² conversion is made.
+    """
     if img.ndim != 3 or img.shape[-1] < 3:
         raise ValueError("Expected an image array with shape (H, W, 3+).")
 
     h, w, _ = img.shape
-    lum = _sanitize_luminance(calculate_luminance(img))
+    raw_lum = calculate_luminance(img).astype(np.float64, copy=False)
+    lum, invalid_count = _finite_nonnegative_luminance(raw_lum)
+
     if lum.size == 0:
         raise ValueError("Empty luminance data: image has no pixels.")
 
-    positive_lum = lum[np.isfinite(lum) & (lum > 0.0)]
+    positive_lum = lum[lum > 0.0]
+
     if positive_lum.size == 0:
         min_lum = LUMINANCE_EPSILON
         max_lum = LUMINANCE_EPSILON
-        pcts = {key: 0.0 for key in (
-            "p0_1", "p1", "p5", "p25", "p50", "p75", "p95", "p99", "p99_9"
-        )}
+        pcts = {
+            key: 0.0
+            for key in (
+                "p0_1", "p1", "p5", "p25", "p50",
+                "p75", "p95", "p99", "p99_9"
+            )
+        }
     else:
         min_lum = float(np.min(positive_lum))
         max_lum = float(np.max(positive_lum))
@@ -93,9 +105,16 @@ def analyze_luminance(img: np.ndarray) -> dict:
         else 0.0
     )
 
-    # Equirectangular weighting is used only for the mean luminance.
     weights = generate_solid_angle_weights(h, w)
     weighted_lum = lum * weights
+
+    total_pixels = int(lum.size)
+    invalid_ratio = invalid_count / total_pixels if total_pixels else 0.0
+
+    highlight_mask = lum > HIGHLIGHT_THRESHOLD
+    shadow_mask = lum < SHADOW_THRESHOLD
+    highlight_clip_mask = lum > HIGHLIGHT_CLIP_THRESHOLD
+    shadow_clip_mask = lum < SHADOW_CLIP_THRESHOLD
 
     thresholds = {
         "highlight_threshold": HIGHLIGHT_THRESHOLD,
@@ -104,6 +123,11 @@ def analyze_luminance(img: np.ndarray) -> dict:
         "shadow_clip_threshold": SHADOW_CLIP_THRESHOLD,
         "unit": "EXR units",
         "absolute_cd_m2_calibrated": False,
+        "note": (
+            "Thresholds are fixed EXR luminance units. "
+            "They must not be interpreted as cd/m² unless the source EXR "
+            "is absolutely calibrated."
+        ),
     }
 
     return {
@@ -114,9 +138,16 @@ def analyze_luminance(img: np.ndarray) -> dict:
         "dynamic_range_ev": dynamic_range_ev,
         "robust_dynamic_range_ev": robust_dynamic_range_ev,
         "thresholds": thresholds,
-        "highlight_pixel_ratio": float(np.mean(lum > HIGHLIGHT_THRESHOLD)),
-        "shadow_pixel_ratio": float(np.mean(lum < SHADOW_THRESHOLD)),
-        "highlight_clipping_ratio": float(np.mean(lum > HIGHLIGHT_CLIP_THRESHOLD)),
-        "shadow_clipping_ratio": float(np.mean(lum < SHADOW_CLIP_THRESHOLD)),
+        "total_pixels": total_pixels,
+        "invalid_pixel_count": invalid_count,
+        "invalid_pixel_ratio": float(invalid_ratio),
+        "highlight_pixel_count": int(np.count_nonzero(highlight_mask)),
+        "shadow_pixel_count": int(np.count_nonzero(shadow_mask)),
+        "highlight_clipping_pixel_count": int(np.count_nonzero(highlight_clip_mask)),
+        "shadow_clipping_pixel_count": int(np.count_nonzero(shadow_clip_mask)),
+        "highlight_pixel_ratio": float(np.mean(highlight_mask)),
+        "shadow_pixel_ratio": float(np.mean(shadow_mask)),
+        "highlight_clipping_ratio": float(np.mean(highlight_clip_mask)),
+        "shadow_clipping_ratio": float(np.mean(shadow_clip_mask)),
         "percentiles": pcts,
     }

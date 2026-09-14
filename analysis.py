@@ -8,7 +8,7 @@ from light_sources import detect_light_sources
 
 
 def analyze_hdri_file(filepath: str) -> tuple[Any, dict]:
-    """Load one HDR image and compute all image-level analysis metrics."""
+    """Load one HDR image and compute image-level analysis metrics."""
     img = load_hdri(filepath)
     lum_stats = analyze_luminance(img)
     energy_stats = analyze_rgb_energy(img)

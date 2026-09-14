@@ -32,7 +32,7 @@ def analyze_file(filepath: str, output_dir: str):
 
     print(f"Analysis complete in {time.time() - start_time:.2f}s")
     print(f"Dynamic Range: {report_data['luminance']['dynamic_range_ev']:.2f} EV")
-    print(f"Detected Light Sources: {report_data['light_source_count']}")
+    print(f"Detected Highlight Regions: {report_data['highlight_region_count']}")
     print(f"Outputs saved to: {out_path}/")
 
 
