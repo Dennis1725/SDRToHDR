@@ -125,9 +125,14 @@ def save_histograms(img: np.ndarray, output_path: str):
     plt.close()
 
 
-def _wasserstein_1d_from_cdf(pdf1, pdf2, bin_edges):
-    cdf1 = np.cumsum(pdf1)
-    cdf2 = np.cumsum(pdf2)
+def _wasserstein_1d_from_cdf(p1, p2, bin_edges):
+    """1-D Wasserstein-Distanz (W1) aus zwei Bin-Wahrscheinlichkeiten.
+
+    p1, p2: Wahrscheinlichkeiten pro Bin (Summe = 1), gleiche Bin-Grenzen.
+    Ergebnis in den Einheiten der Bin-Achse (hier: log10-Luminanz).
+    """
+    cdf1 = np.cumsum(p1)
+    cdf2 = np.cumsum(p2)
     bin_widths = np.diff(bin_edges)
     return float(np.sum(np.abs(cdf1 - cdf2) * bin_widths))
 
@@ -154,9 +159,11 @@ def compute_wasserstein_distance(
         return 0.0
 
     bin_edges = np.linspace(lo, hi, bins + 1)
-    h1, _ = np.histogram(log1, bins=bin_edges, density=True)
-    h2, _ = np.histogram(log2, bins=bin_edges, density=True)
-    return _wasserstein_1d_from_cdf(h1, h2, bin_edges)
+    h1, _ = np.histogram(log1, bins=bin_edges)
+    h2, _ = np.histogram(log2, bins=bin_edges)
+    p1 = h1 / h1.sum()
+    p2 = h2 / h2.sum()
+    return _wasserstein_1d_from_cdf(p1, p2, bin_edges)
 
 
 def _rgb_to_lab_simple(rgb_img: np.ndarray) -> np.ndarray:

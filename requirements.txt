@@ -1,0 +1,16 @@
+# HDR environment image analysis and comparison
+# Tested with Python 3.12
+
+# --- Core ---
+numpy>=1.26,<3            # float32 image arrays, luminance / solid-angle math
+opencv-python>=4.8        # .hdr loading, resizing, connected components (light sources)
+matplotlib>=3.7           # false-color images, histograms, comparison figures, PDF reports
+
+# --- EXR support (loader.py) ---
+OpenEXR>=3.2              # .exr reading (OpenEXR.InputFile)
+Imath>=0.0.2              # PixelType used by the EXR loader
+
+# --- Comparison metrics (visualization.py) ---
+# Used for CIEDE2000 colour difference and SSIM. Optional at runtime
+# (imports are guarded), but required for full comparison results.
+scikit-image>=0.21
